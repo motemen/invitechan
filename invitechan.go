@@ -92,7 +92,7 @@ func Do(w http.ResponseWriter, req *http.Request) {
 
 			ch, ok := channels[chName]
 			if !ok {
-				mustReply(ctx, msgEv, fmt.Sprintf("Sorry, channel #%s is not open.", chName))
+				mustReply(ctx, msgEv, fmt.Sprintf("Sorry, channel #%s is not open to multi-channel guests.", chName))
 				return
 			}
 
@@ -112,7 +112,7 @@ func Do(w http.ResponseWriter, req *http.Request) {
 
 			ch, ok := channels[chName]
 			if !ok {
-				mustReply(ctx, msgEv, fmt.Sprintf("Sorry, channel #%s is not open.", chName))
+				mustReply(ctx, msgEv, fmt.Sprintf("Sorry, channel #%s is not open to multi-channel guests.", chName))
 				return
 			}
 
