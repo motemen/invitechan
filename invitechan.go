@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-
 	"os"
 	"strings"
 
@@ -33,64 +32,8 @@ var (
 	userClient = slack.New(clientTokenUser, slack.OptionDebug(true))
 )
 
-const usageText = `Hello! It's invitechan.
-You can use **/plzinviteme** slash command to ...
-`
-
-// doSlashCommand handles /plzinviteme slash command.
-// /plzinviteme [channel <channel>]
-func doSlashCommand(w http.ResponseWriter, req *http.Request) {
-	text := req.FormValue("text")
-	user := req.FormValue("user_id")
-
-	if strings.HasPrefix(text, "channel ") {
-		chName := text[len("channel "):]
-
-		channels, err := getInvitableChannels(req.Context(), chName)
-		if err != nil {
-			panic(err)
-		}
-
-		ch := channels[chName]
-		_, err = userClient.InviteUserToChannelContext(req.Context(), ch.ID, user)
-		if err != nil {
-			panic(err)
-		}
-
-		w.WriteHeader(200)
-	} else {
-		msg := "Channels:\n"
-		channels, err := getInvitableChannels(req.Context(), "")
-		if err != nil {
-			panic(err)
-		}
-
-		for _, ch := range channels {
-			msg += "* " + ch.Name + "\n"
-		}
-
-		responseURL := req.FormValue("response_url")
-		_, err = botClient.PostEphemeralContext(
-			req.Context(),
-			req.FormValue("channel_id"),
-			req.FormValue("user_id"),
-			slack.MsgOptionText(msg, false),
-			slack.MsgOptionResponseURL(responseURL, ""),
-		)
-		if err != nil {
-			panic(err)
-		}
-	}
-}
-
 func Do(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
-
-	if req.Header.Get("Content-Type") == "application/x-www-form-urlencoded" {
-		// Must be slack command. Handle /plzinviteme
-		doSlashCommand(w, req)
-		return
-	}
 
 	defer req.Body.Close()
 	buf, err := ioutil.ReadAll(req.Body)
@@ -120,59 +63,80 @@ func Do(w http.ResponseWriter, req *http.Request) {
 
 	msgEv := ev.InnerEvent.Data.(*slackevents.MessageEvent)
 	log.Printf("%#v", msgEv)
+
 	// DM commands:
-	// - @invitechan list
-	// - @invitechan join <channel>
-	// - @invitechan leave <channel>
+	// - list
+	// - join <channel>
+	// - leave <channel>
 	if msgEv.Type == slack.TYPE_MESSAGE && msgEv.SubType == "" {
 		if _, ok := hasPrefix(msgEv.Text, "list"); ok {
-			channels, err := getInvitableChannels(ctx, "")
+			channels, err := getOpenChannels(ctx)
 			if err != nil {
-				panic(err)
+				mustReply(ctx, msgEv, fmt.Sprintf("Error: %s", err))
+				return
 			}
+
 			msg := "Available channels:\n"
 			for chName := range channels {
 				msg += "• " + chName + "\n"
 			}
 			msg += `Tell me “join _channel_” to join one!`
-			_, _, err = botClient.PostMessageContext(ctx, msgEv.Channel, slack.MsgOptionText(msg, false))
-			if err != nil {
-				panic(err)
-			}
+
+			mustReply(ctx, msgEv, msg)
 		} else if chName, ok := hasPrefix(msgEv.Text, "join "); ok {
-			channels, err := getInvitableChannels(ctx, chName)
+			channels, err := getOpenChannels(ctx)
 			if err != nil {
-				panic(err)
+				mustReply(ctx, msgEv, fmt.Sprintf("Error: %s", err))
+				return
 			}
-			ch := channels[chName]
+
+			ch, ok := channels[chName]
+			if !ok {
+				mustReply(ctx, msgEv, fmt.Sprintf("Sorry, channel #%s is not open.", chName))
+				return
+			}
+
+			mustReply(ctx, msgEv, fmt.Sprintf("Okay, I will invite you to #%s!", chName))
+
 			_, err = userClient.InviteUserToChannelContext(ctx, ch.ID, msgEv.User)
 			if err != nil {
-				panic(err)
+				mustReply(ctx, msgEv, fmt.Sprintf("Error: %s", err))
+				return
 			}
 		} else if chName, ok := hasPrefix(msgEv.Text, "leave "); ok {
-			channels, err := getInvitableChannels(ctx, chName)
+			channels, err := getOpenChannels(ctx)
 			if err != nil {
-				panic(err)
+				mustReply(ctx, msgEv, fmt.Sprintf("Error: %s", err))
+				return
 			}
-			ch := channels[chName]
+
+			ch, ok := channels[chName]
+			if !ok {
+				mustReply(ctx, msgEv, fmt.Sprintf("Sorry, channel #%s is not open.", chName))
+				return
+			}
+
+			mustReply(ctx, msgEv, fmt.Sprintf("Okay, I will kick you from #%s!", chName))
+
 			err = userClient.KickUserFromConversationContext(ctx, ch.ID, msgEv.User)
 			if err != nil {
-				panic(err)
+				mustReply(ctx, msgEv, fmt.Sprintf("Error: %s", err))
+				return
 			}
 		} else {
-			msg := `Hello! I let multi-channel guests to freely join open channels.
+			msg := `Hello! With me multi-channel guests can join open channels freely.
 
 *If you are a multi-channel guest:*
 Tell me:
-• “list”
-• “join _channel_”
-• “leave _channel_”
+• “list” to list open channels
+• “join _channel_” to join one
+• “leave _channel_” to leave one
 
 *If you are a regular user:*
 Public channels where I’m in are marked open to guests.
 Invite me to channels so that guests can join them.
 `
-			botClient.PostMessageContext(ctx, msgEv.Channel, slack.MsgOptionText(msg, false))
+			mustReply(ctx, msgEv, msg)
 		}
 	}
 }
@@ -184,15 +148,7 @@ func hasPrefix(s, prefix string) (string, bool) {
 	return s, false
 }
 
-// We don't mind caching channels list forever, as we assume serverless nature.
-var cachedChannels map[string]slack.Channel
-
-// TODO: fix race
-func getInvitableChannels(ctx context.Context, hintChannelName string) (map[string]slack.Channel, error) {
-	if cachedChannels != nil {
-		return cachedChannels, nil
-	}
-
+func getOpenChannels(ctx context.Context) (map[string]slack.Channel, error) {
 	channels := map[string]slack.Channel{}
 	params := &slack.GetConversationsForUserParameters{
 		Types:           []string{"public_channel"},
@@ -203,13 +159,9 @@ func getInvitableChannels(ctx context.Context, hintChannelName string) (map[stri
 		if err != nil {
 			return nil, err
 		}
+
 		for _, ch := range chs {
-			log.Printf("%#v", ch)
 			channels[ch.Name] = ch
-			if hintChannelName != "" && ch.Name == hintChannelName {
-				// Early return
-				return channels, nil
-			}
 		}
 
 		if cursor == "" {
@@ -218,6 +170,12 @@ func getInvitableChannels(ctx context.Context, hintChannelName string) (map[stri
 		params.Cursor = cursor
 	}
 
-	cachedChannels = channels
 	return channels, nil
+}
+
+func mustReply(ctx context.Context, msgEv *slackevents.MessageEvent, text string) {
+	_, _, err := botClient.PostMessageContext(ctx, msgEv.Channel, slack.MsgOptionText(text, false))
+	if err != nil {
+		panic(err)
+	}
 }
