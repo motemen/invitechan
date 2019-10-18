@@ -12,13 +12,17 @@ Send direct messages to @invitechan bot.
 > Hello! With me multi-channel guests can join open channels freely.
 >
 > **If you are a multi-channel guest:**
+>
 > Tell me:
-> -“list” to list open channels
-> -“join channel” to join one
-> -“leave channel” to leave one
+>
+> * “list” to list open channels
+> * “join channel” to join one
+> * “leave channel” to leave one
 >
 > **If you are a regular user:**
+>
 > Public channels where I’m in are marked open to guests.
+>
 > Invite me to channels so that guests can join them.
 
 Installation and deployment
