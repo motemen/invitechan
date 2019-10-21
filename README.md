@@ -7,7 +7,7 @@ Open channels are marked by inviting @invitechan bot to public channels.
 Usage
 -----
 
-Send direct messages to @invitechan bot.
+Use `/plzinviteme` shasl command.
 
 > Hello! With me multi-channel guests can join open channels freely.
 >
@@ -30,7 +30,8 @@ Installation and deployment
 
 * Create a Slack app with:
   * Bot user
-  * Bot events subscribed on `message.im`
+  * Bot events subscribed on `message.im` with URL `.../invitechan` *TBD
+  * Slash command `/plzinviteme` with URL `.../command` *TBD
 * Create a file `env.yaml` with:
   * SLACK_TOKEN_USER key with value "OAuth Access Token"
   * SLACK_TOKEN_BOT key with value "Bot User OAuth Access Token"
