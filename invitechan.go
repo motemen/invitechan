@@ -79,7 +79,7 @@ func Do(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if ev.Type == slackevents.URLVerification {
-		verifyEv := ev.InnerEvent.Data.(*slackevents.EventsAPIURLVerificationEvent)
+		verifyEv := ev.Data.(*slackevents.EventsAPIURLVerificationEvent)
 		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprint(w, verifyEv.Challenge)
 		return
