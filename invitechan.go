@@ -12,11 +12,13 @@ import (
 
 	"github.com/nlopes/slack"
 	"github.com/nlopes/slack/slackevents"
+	"golang.org/x/oauth2"
+	oauth2Slack "golang.org/x/oauth2/slack"
 )
 
 var (
-	clientTokenUser = mustGetEnv("SLACK_TOKEN_USER")
-	clientTokenBot  = mustGetEnv("SLACK_TOKEN_BOT")
+	fixedClientTokenUser = os.Getenv("SLACK_TOKEN_USER")
+	fixedClientTokenBot  = os.Getenv("SLACK_TOKEN_BOT")
 )
 
 type messageContext struct {
@@ -35,8 +37,8 @@ func mustGetEnv(name string) string {
 }
 
 var (
-	botClient  = slack.New(clientTokenBot, slack.OptionDebug(true))
-	userClient = slack.New(clientTokenUser, slack.OptionDebug(true))
+	botClient  = slack.New(fixedClientTokenBot, slack.OptionDebug(true))
+	userClient = slack.New(fixedClientTokenUser, slack.OptionDebug(true))
 )
 
 func Command(w http.ResponseWriter, req *http.Request) {
@@ -103,6 +105,37 @@ func Do(w http.ResponseWriter, req *http.Request) {
 			text:      msgEv.Text,
 		})
 	}
+}
+
+var oauth2Config = &oauth2.Config{
+	ClientID:     os.Getenv("SLACK_APP_CLIENT_ID"),
+	ClientSecret: os.Getenv("SLACK_APP_CLIENT_SECRET"),
+	Scopes:       []string{"bot", "commands"},
+	Endpoint:     oauth2Slack.Endpoint,
+	RedirectURL: fmt.Sprintf(
+		"https://%s-%s.cloudfunctions.net/auth-callback",
+		os.Getenv("FUNCTION_REGION"),
+		os.Getenv("GCP_PROJECT"),
+	),
+}
+
+// https://api.slack.com/docs/oauth
+func Auth(w http.ResponseWriter, req *http.Request) {
+	u := oauth2Config.AuthCodeURL("") // TODO: state
+	http.Redirect(w, req, u, http.StatusFound)
+}
+
+func AuthCallback(w http.ResponseWriter, req *http.Request) {
+	// TODO: state
+	token, err := oauth2Config.Exchange(req.Context(), req.URL.Query().Get("code"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// TODO: store
+	teamID := token.Extra("team_id")
+	bot := token.Extra("bot")
+	log.Printf("AuthCallback: %#v; teamID=%v bot=%v", token, teamID, bot)
 }
 
 func handleCommand(ctx context.Context, msg messageContext) {
