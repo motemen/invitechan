@@ -14,8 +14,12 @@ import (
 	"github.com/nlopes/slack"
 	"github.com/nlopes/slack/slackevents"
 	"golang.org/x/oauth2"
-	oauth2Slack "golang.org/x/oauth2/slack"
 )
+
+var slackOAuthV2Endpoint = oauth2.Endpoint{
+	AuthURL:  "https://slack.com/oauth/v2/authorize",
+	TokenURL: "https://slack.com/api/oauth.v2.access",
+}
 
 var fixedTokens = teamTokens{
 	UserToken: os.Getenv("SLACK_TOKEN_USER"),
@@ -164,7 +168,7 @@ var oauth2Config = &oauth2.Config{
 	ClientID:     os.Getenv("SLACK_APP_CLIENT_ID"),
 	ClientSecret: os.Getenv("SLACK_APP_CLIENT_SECRET"),
 	Scopes:       []string{"bot", "commands"},
-	Endpoint:     oauth2Slack.Endpoint,
+	Endpoint:     slackOAuthV2Endpoint,
 	RedirectURL: fmt.Sprintf(
 		"https://%s-%s.cloudfunctions.net/%s/auth/callback",
 		os.Getenv("FUNCTION_REGION"),
@@ -195,15 +199,15 @@ func serveAuthCallback(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	teamID := token.Extra("team_id").(string)
-	bot := token.Extra("bot").(map[string]interface{})
-	log.Printf("AuthCallback: %#v; teamID=%v bot=%v", token, teamID, bot)
+	team := token.Extra("team").(map[string]interface{})
+	authedUser := token.Extra("authed_user").(map[string]interface{})
+	log.Printf("AuthCallback: %#v; team=%v authed_user=%v", token, team, authedUser)
 	tokens := teamTokens{
-		UserToken: token.AccessToken,
-		BotToken:  bot["bot_access_token"].(string),
+		BotToken:  token.AccessToken,
+		UserToken: authedUser["access_token"].(string),
 	}
 
-	key := datastore.NameKey(datastoreKindTeamTokens, teamID, nil)
+	key := datastore.NameKey(datastoreKindTeamTokens, team["id"].(string), nil)
 	_, err = datastoreClient.Put(ctx, key, tokens)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
