@@ -10,36 +10,72 @@ import (
 	"os"
 	"strings"
 
+	"cloud.google.com/go/datastore"
 	"github.com/nlopes/slack"
 	"github.com/nlopes/slack/slackevents"
 	"golang.org/x/oauth2"
 	oauth2Slack "golang.org/x/oauth2/slack"
 )
 
-var (
-	fixedClientTokenUser = os.Getenv("SLACK_TOKEN_USER")
-	fixedClientTokenBot  = os.Getenv("SLACK_TOKEN_BOT")
-)
+var fixedTokens = teamTokens{
+	UserToken: os.Getenv("SLACK_TOKEN_USER"),
+	BotToken:  os.Getenv("SLACK_TOKEN_BOT"),
+}
+
+var datastoreClient *datastore.Client
+
+const datastoreKindTeamTokens = "teamTokens"
+
+type teamTokens struct {
+	UserToken string
+	BotToken  string
+}
+
+func (t teamTokens) Valid() bool {
+	return len(t.UserToken) > 0 && len(t.BotToken) > 0
+}
+
+func init() {
+	var err error
+	datastoreClient, err = datastore.NewClient(context.Background(), os.Getenv("GOOGLE_CLOUD_PROJECT"))
+	if err != nil {
+		panic(err)
+	}
+}
 
 type messageContext struct {
 	text      string
-	channelID string
 	userID    string
+	channelID string
+	teamID    string
 	opts      []slack.MsgOption
 }
 
-func mustGetEnv(name string) string {
-	v := os.Getenv(name)
-	if v == "" {
-		panic(fmt.Sprintf("$%s must be set", name))
+func (msg *messageContext) botClient(ctx context.Context) (*slack.Client, error) {
+	tokens := fixedTokens
+	if !tokens.Valid() {
+		key := datastore.NameKey(datastoreKindTeamTokens, msg.teamID, nil)
+		err := datastoreClient.Get(ctx, key, &tokens)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return v
+
+	return slack.New(tokens.BotToken), nil
 }
 
-var (
-	botClient  = slack.New(fixedClientTokenBot, slack.OptionDebug(true))
-	userClient = slack.New(fixedClientTokenUser, slack.OptionDebug(true))
-)
+func (msg *messageContext) userClient(ctx context.Context) (*slack.Client, error) {
+	tokens := fixedTokens
+	if !tokens.Valid() {
+		key := datastore.NameKey(datastoreKindTeamTokens, msg.teamID, nil)
+		err := datastoreClient.Get(ctx, key, &tokens)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return slack.New(tokens.UserToken), nil
+}
 
 var mux *http.ServeMux
 
@@ -51,23 +87,25 @@ func init() {
 	mux.HandleFunc("/auth/callback", serveAuthCallback)
 }
 
+// Do is the Cloud Functions endpoint.
 func Do(w http.ResponseWriter, req *http.Request) {
 	mux.ServeHTTP(w, req)
 }
 
+// https://api.slack.com/interactivity/slash-commands
 func serveCommand(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	text := req.FormValue("text")
+	teamID := req.FormValue("team_id")
 	userID := req.FormValue("user_id")
 	channelID := req.FormValue("channel_id")
 	responseURL := req.FormValue("response_url")
 
-	log.Println(text, userID, channelID, responseURL)
-
 	handleCommand(ctx, messageContext{
-		channelID: channelID,
 		userID:    userID,
+		channelID: channelID,
+		teamID:    teamID,
 		text:      text,
 		opts: []slack.MsgOption{
 			slack.MsgOptionResponseURL(responseURL, "ephemeral"),
@@ -114,8 +152,9 @@ func serveEvents(w http.ResponseWriter, req *http.Request) {
 	// - leave <channel>
 	if msgEv.Type == slack.TYPE_MESSAGE && msgEv.SubType == "" {
 		handleCommand(ctx, messageContext{
-			channelID: msgEv.Channel,
 			userID:    msgEv.User,
+			channelID: msgEv.Channel,
+			teamID:    ev.TeamID,
 			text:      msgEv.Text,
 		})
 	}
@@ -141,21 +180,42 @@ func serveAuth(w http.ResponseWriter, req *http.Request) {
 }
 
 func serveAuthCallback(w http.ResponseWriter, req *http.Request) {
+	if error := req.URL.Query().Get("error"); error != "" {
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprintln(w, error)
+		return
+	}
+
+	ctx := req.Context()
+
 	// TODO: state
 	token, err := oauth2Config.Exchange(req.Context(), req.URL.Query().Get("code"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// TODO: store
-	teamID := token.Extra("team_id")
-	bot := token.Extra("bot")
+
+	teamID := token.Extra("team_id").(string)
+	bot := token.Extra("bot").(map[string]interface{})
 	log.Printf("AuthCallback: %#v; teamID=%v bot=%v", token, teamID, bot)
+	tokens := teamTokens{
+		UserToken: token.AccessToken,
+		BotToken:  bot["bot_access_token"].(string),
+	}
+
+	key := datastore.NameKey(datastoreKindTeamTokens, teamID, nil)
+	_, err = datastoreClient.Put(ctx, key, tokens)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Fprintln(w, "<p>@invitechan installed! Use <code>/plzinviteme</code> to use it.</p>")
 }
 
 func handleCommand(ctx context.Context, msg messageContext) {
 	if _, ok := hasPrefix(msg.text, "list"); ok {
-		channels, err := getOpenChannels(ctx)
+		channels, err := getOpenChannels(ctx, msg)
 		if err != nil {
 			mustReply(ctx, msg, fmt.Sprintf("Error: %s", err))
 			return
@@ -169,7 +229,7 @@ func handleCommand(ctx context.Context, msg messageContext) {
 
 		mustReply(ctx, msg, text)
 	} else if chName, ok := hasPrefix(msg.text, "join "); ok {
-		channels, err := getOpenChannels(ctx)
+		channels, err := getOpenChannels(ctx, msg)
 		if err != nil {
 			mustReply(ctx, msg, fmt.Sprintf("Error: %s", err))
 			return
@@ -183,13 +243,17 @@ func handleCommand(ctx context.Context, msg messageContext) {
 
 		mustReply(ctx, msg, fmt.Sprintf("Okay, I will invite you to #%s!", chName))
 
+		userClient, err := msg.userClient(ctx)
+		if err != nil {
+			log.Fatal(err)
+		}
 		_, err = userClient.InviteUserToChannelContext(ctx, ch.ID, msg.userID)
 		if err != nil {
 			mustReply(ctx, msg, fmt.Sprintf("Error: %s", err))
 			return
 		}
 	} else if chName, ok := hasPrefix(msg.text, "leave "); ok {
-		channels, err := getOpenChannels(ctx)
+		channels, err := getOpenChannels(ctx, msg)
 		if err != nil {
 			mustReply(ctx, msg, fmt.Sprintf("Error: %s", err))
 			return
@@ -203,6 +267,10 @@ func handleCommand(ctx context.Context, msg messageContext) {
 
 		mustReply(ctx, msg, fmt.Sprintf("Okay, I will kick you from #%s!", chName))
 
+		userClient, err := msg.userClient(ctx)
+		if err != nil {
+			log.Fatal(err)
+		}
 		err = userClient.KickUserFromConversationContext(ctx, ch.ID, msg.userID)
 		if err != nil {
 			mustReply(ctx, msg, fmt.Sprintf("Error: %s", err))
@@ -232,11 +300,15 @@ func hasPrefix(s, prefix string) (string, bool) {
 	return s, false
 }
 
-func getOpenChannels(ctx context.Context) (map[string]slack.Channel, error) {
+func getOpenChannels(ctx context.Context, msg messageContext) (map[string]slack.Channel, error) {
 	channels := map[string]slack.Channel{}
 	params := &slack.GetConversationsForUserParameters{
 		Types:           []string{"public_channel"},
 		ExcludeArchived: true,
+	}
+	botClient, err := msg.botClient(ctx)
+	if err != nil {
+		return nil, err
 	}
 	for {
 		chs, cursor, err := botClient.GetConversationsForUserContext(ctx, params)
@@ -258,8 +330,12 @@ func getOpenChannels(ctx context.Context) (map[string]slack.Channel, error) {
 }
 
 func mustReply(ctx context.Context, msg messageContext, text string) {
+	botClient, err := msg.botClient(ctx)
+	if err != nil {
+		panic(err)
+	}
 	opts := append(msg.opts, slack.MsgOptionText(text, false))
-	_, _, err := botClient.PostMessageContext(ctx, msg.channelID, opts...)
+	_, _, err = botClient.PostMessageContext(ctx, msg.channelID, opts...)
 	if err != nil {
 		panic(err)
 	}
