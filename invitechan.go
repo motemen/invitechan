@@ -41,7 +41,21 @@ var (
 	userClient = slack.New(fixedClientTokenUser, slack.OptionDebug(true))
 )
 
-func Command(w http.ResponseWriter, req *http.Request) {
+var mux *http.ServeMux
+
+func init() {
+	mux = http.NewServeMux()
+	mux.HandleFunc("/command", serveCommand)
+	mux.HandleFunc("/events", serveEvents)
+	mux.HandleFunc("/auth", serveAuth)
+	mux.HandleFunc("/auth/callback", serveAuthCallback)
+}
+
+func Do(w http.ResponseWriter, req *http.Request) {
+	mux.ServeHTTP(w, req)
+}
+
+func serveCommand(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	text := req.FormValue("text")
@@ -62,7 +76,7 @@ func Command(w http.ResponseWriter, req *http.Request) {
 	)
 }
 
-func Do(w http.ResponseWriter, req *http.Request) {
+func serveEvents(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	defer req.Body.Close()
@@ -113,19 +127,20 @@ var oauth2Config = &oauth2.Config{
 	Scopes:       []string{"bot", "commands"},
 	Endpoint:     oauth2Slack.Endpoint,
 	RedirectURL: fmt.Sprintf(
-		"https://%s-%s.cloudfunctions.net/auth-callback",
+		"https://%s-%s.cloudfunctions.net/%s/auth/callback",
 		os.Getenv("FUNCTION_REGION"),
 		os.Getenv("GCP_PROJECT"),
+		os.Getenv("FUNCTION_NAME"),
 	),
 }
 
 // https://api.slack.com/docs/oauth
-func Auth(w http.ResponseWriter, req *http.Request) {
+func serveAuth(w http.ResponseWriter, req *http.Request) {
 	u := oauth2Config.AuthCodeURL("") // TODO: state
 	http.Redirect(w, req, u, http.StatusFound)
 }
 
-func AuthCallback(w http.ResponseWriter, req *http.Request) {
+func serveAuthCallback(w http.ResponseWriter, req *http.Request) {
 	// TODO: state
 	token, err := oauth2Config.Exchange(req.Context(), req.URL.Query().Get("code"))
 	if err != nil {
