@@ -16,6 +16,8 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// https://api.slack.com/authentication/oauth-v2
+
 var slackOAuthV2Endpoint = oauth2.Endpoint{
 	AuthURL:  "https://slack.com/oauth/v2/authorize",
 	TokenURL: "https://slack.com/api/oauth.v2.access",
@@ -41,7 +43,7 @@ func (t teamTokens) Valid() bool {
 
 func init() {
 	var err error
-	datastoreClient, err = datastore.NewClient(context.Background(), os.Getenv("GOOGLE_CLOUD_PROJECT"))
+	datastoreClient, err = datastore.NewClient(context.Background(), os.Getenv("GCP_PROJECT"))
 	if err != nil {
 		panic(err)
 	}
@@ -167,7 +169,7 @@ func serveEvents(w http.ResponseWriter, req *http.Request) {
 var oauth2Config = &oauth2.Config{
 	ClientID:     os.Getenv("SLACK_APP_CLIENT_ID"),
 	ClientSecret: os.Getenv("SLACK_APP_CLIENT_SECRET"),
-	Scopes:       []string{"bot", "commands"},
+	Scopes:       []string{"commands", "channels:read"}, // NOTE: bot scope is not needed for V2 OAuth
 	Endpoint:     slackOAuthV2Endpoint,
 	RedirectURL: fmt.Sprintf(
 		"https://%s-%s.cloudfunctions.net/%s/auth/callback",
@@ -179,22 +181,24 @@ var oauth2Config = &oauth2.Config{
 
 // https://api.slack.com/docs/oauth
 func serveAuth(w http.ResponseWriter, req *http.Request) {
-	u := oauth2Config.AuthCodeURL("") // TODO: state
+	u := oauth2Config.AuthCodeURL("", oauth2.SetAuthURLParam("user_scope", "channels:write")) // TODO: state
 	http.Redirect(w, req, u, http.StatusFound)
 }
 
 func serveAuthCallback(w http.ResponseWriter, req *http.Request) {
-	if error := req.URL.Query().Get("error"); error != "" {
+	if err := req.URL.Query().Get("error"); err != "" {
 		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprintln(w, error)
+		fmt.Fprintln(w, err)
 		return
 	}
 
 	ctx := req.Context()
 
+	// https://api.slack.com/methods/oauth.v2.access
 	// TODO: state
 	token, err := oauth2Config.Exchange(req.Context(), req.URL.Query().Get("code"))
 	if err != nil {
+		log.Printf("oauth2Config.Exchange: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -208,13 +212,13 @@ func serveAuthCallback(w http.ResponseWriter, req *http.Request) {
 	}
 
 	key := datastore.NameKey(datastoreKindTeamTokens, team["id"].(string), nil)
-	_, err = datastoreClient.Put(ctx, key, tokens)
+	_, err = datastoreClient.Put(ctx, key, &tokens)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	fmt.Fprintln(w, "<p>@invitechan installed! Use <code>/plzinviteme</code> to use it.</p>")
+	fmt.Fprintln(w, "<p>@invitechan has been installed! Use <code>/plzinviteme</code> to use it.</p>")
 }
 
 func handleCommand(ctx context.Context, msg messageContext) {
