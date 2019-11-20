@@ -1,3 +1,5 @@
+name: Deploy
+
 on:
   push:
     branches:
@@ -12,7 +14,7 @@ jobs:
         env:
           GCLOUD_AUTH: ${{ secrets.GCLOUD_AUTH }}
       - run: |
-          gcloud deploy invitechan \
+          gcloud functions deploy invitechan \
             --set-env-vars 'SLACK_APP_CLIENT_ID=${{ secrets.SLACK_APP_CLIENT_ID }},SLACK_APP_CLIENT_SECRET=${{ secrets.SLACK_APP_CLIENT_SECRET }},SLACK_APP_SIGNING_SECRET=${{ secrets.SLACK_APP_SIGNING_SECRET }}' \
             --runtime go111 \
             --entry-point Do \
