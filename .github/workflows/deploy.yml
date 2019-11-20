@@ -13,10 +13,12 @@ jobs:
       - uses: actions/gcloud/auth@master
         env:
           GCLOUD_AUTH: ${{ secrets.GCLOUD_AUTH }}
-      - run: |
-          gcloud functions deploy invitechan \
-            --project invitechan-public \
-            --set-env-vars 'SLACK_APP_CLIENT_ID=${{ secrets.SLACK_APP_CLIENT_ID }},SLACK_APP_CLIENT_SECRET=${{ secrets.SLACK_APP_CLIENT_SECRET }},SLACK_APP_SIGNING_SECRET=${{ secrets.SLACK_APP_SIGNING_SECRET }}' \
-            --runtime go111 \
-            --entry-point Do \
-            --trigger-http
+      - uses: actions/gcloud/cli@master
+        with:
+          args: |
+              gcloud functions deploy invitechan \
+                --project invitechan-public \
+                --set-env-vars 'SLACK_APP_CLIENT_ID=${{ secrets.SLACK_APP_CLIENT_ID }},SLACK_APP_CLIENT_SECRET=${{ secrets.SLACK_APP_CLIENT_SECRET }},SLACK_APP_SIGNING_SECRET=${{ secrets.SLACK_APP_SIGNING_SECRET }}' \
+                --runtime go111 \
+                --entry-point Do \
+                --trigger-http
