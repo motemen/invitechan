@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -123,18 +124,31 @@ func serveCommand(w http.ResponseWriter, req *http.Request) {
 func serveEvents(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
-	defer req.Body.Close()
-	buf, err := ioutil.ReadAll(req.Body)
+	v, err := slack.NewSecretsVerifier(req.Header, os.Getenv("SLACK_APP_SIGNING_SECRET"))
 	if err != nil {
 		log.Println(err)
-		http.Error(w, "Internal Server Error", 500)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	defer req.Body.Close()
+	buf, err := ioutil.ReadAll(io.TeeReader(req.Body, &v))
+	if err != nil {
+		log.Println(err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	if err := v.Ensure(); err != nil {
+		log.Println(err)
+		http.Error(w, "Verification failed", http.StatusUnauthorized)
 		return
 	}
 
 	ev, err := slackevents.ParseEvent(json.RawMessage(buf), slackevents.OptionNoVerifyToken())
 	if err != nil {
 		log.Println(err)
-		http.Error(w, "Internal Server Error", 500)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
