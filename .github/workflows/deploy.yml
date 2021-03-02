@@ -10,15 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@master
-      - uses: actions/gcloud/auth@master
-        env:
-          GCLOUD_AUTH: ${{ secrets.GCLOUD_AUTH }}
-      - uses: actions/gcloud/cli@master
+      - uses: google-github-actions/setup-gcloud@master
         with:
-          args: |
-              functions deploy invitechan \
-                --project invitechan-public \
-                --set-env-vars 'GCP_PROJECT=invitechan-public,SLACK_APP_CLIENT_ID=${{ secrets.SLACK_APP_CLIENT_ID }},SLACK_APP_CLIENT_SECRET=${{ secrets.SLACK_APP_CLIENT_SECRET }},SLACK_APP_SIGNING_SECRET=${{ secrets.SLACK_APP_SIGNING_SECRET }}' \
-                --runtime go113 \
-                --entry-point Do \
-                --trigger-http
+          service_account_key: ${{ secrets.GCLOUD_AUTH }}
+      - run: |
+          gcloud functions deploy invitechan \
+            --project invitechan-public \
+            --set-env-vars 'GCP_PROJECT=invitechan-public,SLACK_APP_CLIENT_ID=${{ secrets.SLACK_APP_CLIENT_ID }},SLACK_APP_CLIENT_SECRET=${{ secrets.SLACK_APP_CLIENT_SECRET }},SLACK_APP_SIGNING_SECRET=${{ secrets.SLACK_APP_SIGNING_SECRET }}' \
+            --runtime go113 \
+            --entry-point Do \
+            --trigger-http
