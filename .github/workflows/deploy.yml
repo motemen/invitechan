@@ -18,7 +18,7 @@ jobs:
           args: |
               functions deploy invitechan \
                 --project invitechan-public \
-                --set-env-vars 'SLACK_APP_CLIENT_ID=${{ secrets.SLACK_APP_CLIENT_ID }},SLACK_APP_CLIENT_SECRET=${{ secrets.SLACK_APP_CLIENT_SECRET }},SLACK_APP_SIGNING_SECRET=${{ secrets.SLACK_APP_SIGNING_SECRET }}' \
-                --runtime go111 \
+                --set-env-vars 'GCP_PROJECT=invitechan-public,SLACK_APP_CLIENT_ID=${{ secrets.SLACK_APP_CLIENT_ID }},SLACK_APP_CLIENT_SECRET=${{ secrets.SLACK_APP_CLIENT_SECRET }},SLACK_APP_SIGNING_SECRET=${{ secrets.SLACK_APP_SIGNING_SECRET }}' \
+                --runtime go113 \
                 --entry-point Do \
                 --trigger-http
