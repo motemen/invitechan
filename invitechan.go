@@ -44,6 +44,7 @@ func (t teamTokens) Valid() bool {
 
 func init() {
 	var err error
+	// FIXME(motemen): as of go113, GCP_PROJECT environment variables is not automatically set, so users must set it manually (in env.{project}.yaml)
 	datastoreClient, err = datastore.NewClient(context.Background(), os.Getenv("GCP_PROJECT"))
 	if err != nil {
 		panic(err)

@@ -37,3 +37,8 @@ Installation and deployment
   * SLACK_TOKEN_BOT key with value "Bot User OAuth Access Token"
 * Create a Google Cloud Platform project
 * Then `make deploy PROJECT=<project name>`
+
+TODO
+----
+
+* Require member's approval on guest join
