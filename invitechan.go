@@ -25,7 +25,7 @@ var slackOAuthV2Endpoint = oauth2.Endpoint{
 }
 
 var fixedTokens = teamTokens{
-	UserToken: os.Getenv("SLACK_TOKEN_USER"),
+	UserToken: os.Getenv("SLACK_TOKEN_USER"), // 不要？
 	BotToken:  os.Getenv("SLACK_TOKEN_BOT"),
 }
 
@@ -181,17 +181,25 @@ func serveEvents(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
+func getenv(key, fallback string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
 var oauth2Config = &oauth2.Config{
 	ClientID:     os.Getenv("SLACK_APP_CLIENT_ID"),
 	ClientSecret: os.Getenv("SLACK_APP_CLIENT_SECRET"),
 	Scopes:       []string{"commands", "channels:read"}, // NOTE: bot scope is not needed for V2 OAuth
 	Endpoint:     slackOAuthV2Endpoint,
-	RedirectURL: fmt.Sprintf(
+	RedirectURL: getenv("INVITECHAN_AUTH_REDIRECT_URL", fmt.Sprintf(
 		"https://%s-%s.cloudfunctions.net/%s/auth/callback",
 		os.Getenv("FUNCTION_REGION"),
 		os.Getenv("GCP_PROJECT"),
 		os.Getenv("FUNCTION_NAME"),
-	),
+	)),
 }
 
 // https://api.slack.com/docs/oauth

@@ -9,3 +9,7 @@ deploy:
 		--runtime go113 \
 		--entry-point Do \
 		--trigger-http
+
+local:
+	npx dotenv-cli -c invitechan-public -- go run ./cmd/local
+	npx localtunnel --port 3000 --subdomain invitechan-dev
