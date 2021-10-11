@@ -164,20 +164,23 @@ func serveEvents(w http.ResponseWriter, req *http.Request) {
 		log.Printf("Unknown event type: %q", ev.Type)
 	}
 
-	msgEv := ev.InnerEvent.Data.(*slackevents.MessageEvent)
-	log.Printf("%#v", msgEv)
+	if msgEv, ok := ev.InnerEvent.Data.(*slackevents.MessageEvent); ok {
+		log.Printf("got message: %#v", msgEv)
 
-	// DM commands:
-	// - list
-	// - join <channel>
-	// - leave <channel>
-	if msgEv.Type == slack.TYPE_MESSAGE && msgEv.SubType == "" {
-		handleCommand(ctx, messageContext{
-			userID:    msgEv.User,
-			channelID: msgEv.Channel,
-			teamID:    ev.TeamID,
-			text:      msgEv.Text,
-		})
+		// DM commands:
+		// - list
+		// - join <channel>
+		// - leave <channel>
+		if msgEv.Type == slack.TYPE_MESSAGE && msgEv.SubType == "" {
+			handleCommand(ctx, messageContext{
+				userID:    msgEv.User,
+				channelID: msgEv.Channel,
+				teamID:    ev.TeamID,
+				text:      msgEv.Text,
+			})
+		}
+	} else {
+		log.Printf("got unknown message: %#v", ev.InnerEvent.Data)
 	}
 }
 
@@ -245,6 +248,8 @@ func serveAuthCallback(w http.ResponseWriter, req *http.Request) {
 }
 
 func handleCommand(ctx context.Context, msg messageContext) {
+	log.Printf("handleCommand %v", msg)
+
 	if _, ok := hasPrefix(msg.text, "list"); ok {
 		channels, err := getOpenChannels(ctx, msg)
 		if err != nil {
